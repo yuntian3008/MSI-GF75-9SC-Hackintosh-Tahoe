@@ -96,7 +96,19 @@ jobs:
                       pass
           PY
 
-          sha256sum -c /tmp/efi-manifest.sha256
+          python3 <<'PY'
+          import plistlib
+          from pathlib import Path
+          p = Path('EFI/OC/Kexts/itlwm.kext/Contents/Info.plist')
+          info = plistlib.loads(p.read_bytes())
+          personalities = info.get('IOKitPersonalities', {})
+          for personality in personalities.values():
+              if isinstance(personality, dict) and personality.get('WiFiConfig'):
+                  raise SystemExit('Refusing to publish itlwm Info.plist containing embedded Wi-Fi credentials')
+          PY
+
+          grep -v '  EFI/OC/Kexts/itlwm.kext/Contents/Info.plist$' /tmp/efi-manifest.sha256 > /tmp/efi-manifest-check.sha256
+          sha256sum -c /tmp/efi-manifest-check.sha256
 
       - name: Save failure diagnostics
         if: failure()
@@ -114,6 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .efi-build
+          rm -f .efi-debug.log
           rm -f .github/workflows/publish-efi.yml
           rmdir .github/workflows 2>/dev/null || true
           rmdir .github 2>/dev/null || true
