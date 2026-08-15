@@ -4,7 +4,7 @@ OpenCore EFI for the **MSI GF75 Thin 9SC** (Coffee Lake-H), tested on **macOS Ta
 
 ## Screenshot
 
-![macOS Tahoe 26.6.1 running on MSI GF75 Thin 9SC](assets/tahoe-fastfetch.jpg)
+<img width="1920" height="1080" alt="macOS Tahoe 26.6.1 running on MSI GF75 Thin 9SC" src="https://github.com/user-attachments/assets/d534b825-e79a-41c9-99ef-b20fe598cdf3" />
 
 *macOS Tahoe 26.6.1 on MSI GF75 Thin 9SC — Intel Core i7-9750H, Intel UHD 630, SMBIOS `MacBookPro16,1`.*
 
