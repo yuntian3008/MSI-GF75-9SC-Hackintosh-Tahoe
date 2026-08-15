@@ -1,0 +1,111 @@
+name: Publish EFI payload
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.efi-build/**'
+      - '.github/workflows/publish-efi.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild exact upstream payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          OCS="$RUNNER_TEMP/OpCore-Simplify"
+          git clone --quiet https://github.com/lzhoang2801/OpCore-Simplify.git "$OCS"
+          git -C "$OCS" checkout --quiet 893885a431abde7c27e8e56cb9fe7c2ea03ea68d
+
+          python3 - "$OCS" <<'PY'
+          import sys
+          root = sys.argv[1]
+          sys.path.insert(0, root)
+          from Scripts.datasets import kext_data
+          from Scripts.gathering_files import gatheringFiles
+
+          wanted = {
+              'Lilu', 'VirtualSMC', 'SMCBatteryManager', 'SMCLightSensor',
+              'SMCProcessor', 'SMCSuperIO', 'WhateverGreen', 'AppleALC',
+              'itlwm', 'BlueToolFixup', 'IntelBluetoothFirmware',
+              'IntelBTPatcher', 'RealtekRTL8111', 'VoodooI2C', 'VoodooI2CHID',
+              'VoodooPS2Controller', 'NVMeFix', 'BrightnessKeys', 'ECEnabler',
+              'RestrictEvents', 'AMFIPass'
+          }
+          for k in kext_data.kexts:
+              k.checked = k.name in wanted
+          ok = gatheringFiles().gather_bootloader_kexts(kext_data.kexts, '25.0.0')
+          if ok is False:
+              raise SystemExit('OpCore-Simplify dependency gather failed')
+          PY
+
+          rm -rf EFI
+          cp -a "$OCS/OCK_Files/OpenCorePkg/EFI" ./EFI
+          mkdir -p EFI/OC/Kexts
+
+          for kext in \
+            AMFIPass.kext AppleALC.kext BlueToolFixup.kext BrightnessKeys.kext \
+            ECEnabler.kext IntelBTPatcher.kext IntelBluetoothFirmware.kext \
+            Lilu.kext NVMeFix.kext RealtekRTL8111.kext RestrictEvents.kext \
+            SMCBatteryManager.kext SMCLightSensor.kext SMCProcessor.kext \
+            SMCSuperIO.kext VirtualSMC.kext VoodooI2C.kext VoodooI2CHID.kext \
+            VoodooPS2Controller.kext WhateverGreen.kext itlwm.kext
+          do
+            src="$(find "$OCS/OCK_Files" -type d -name "$kext" -print -quit)"
+            if [ -z "$src" ]; then
+              echo "Missing dependency: $kext" >&2
+              exit 1
+            fi
+            rm -rf "EFI/OC/Kexts/$kext"
+            cp -a "$src" EFI/OC/Kexts/
+          done
+
+          cat .efi-build/overlay.part-* | base64 -d > "$RUNNER_TEMP/overlay.tar.gz"
+          tar -xzf "$RUNNER_TEMP/overlay.tar.gz" -C .
+
+          cat .efi-build/manifest.part-* > /tmp/efi-manifest.sha256
+
+          python3 <<'PY'
+          from pathlib import Path
+          manifest = Path('/tmp/efi-manifest.sha256').read_text().splitlines()
+          expected = {line.split('  ', 1)[1] for line in manifest if line.strip()}
+          root = Path('EFI')
+          for p in sorted(root.rglob('*'), reverse=True):
+              rel = p.as_posix()
+              if p.is_file() and rel not in expected:
+                  p.unlink()
+          for p in sorted(root.rglob('*'), reverse=True):
+              if p.is_dir():
+                  try:
+                      p.rmdir()
+                  except OSError:
+                      pass
+          PY
+
+          sha256sum -c /tmp/efi-manifest.sha256
+
+      - name: Commit EFI and remove temporary builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .efi-build
+          rm -f .github/workflows/publish-efi.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git status --short
+          git commit -m 'Add sanitized tested EFI' 
+          git push origin HEAD:main
