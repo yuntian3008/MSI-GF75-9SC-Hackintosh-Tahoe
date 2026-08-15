@@ -16,14 +16,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Rebuild exact upstream payload
         shell: bash
         run: |
-          exec > >(tee "$RUNNER_TEMP/efi-build.log") 2>&1
+          : > .efi-debug.log
+          exec > >(tee -a .efi-debug.log) 2>&1
+          trap 'rc=$?; echo "FAILED: $BASH_COMMAND (exit $rc)" >> .efi-debug.log; exit $rc' ERR
           set -euo pipefail
           OCS="$RUNNER_TEMP/OpCore-Simplify"
           git clone --quiet https://github.com/lzhoang2801/OpCore-Simplify.git "$OCS"
@@ -101,12 +103,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp "$RUNNER_TEMP/efi-build.log" .efi-debug.log
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .efi-debug.log
-          git commit -m 'Capture EFI build failure'
-          git push origin HEAD:main
+          git add -f .efi-debug.log
+          git commit -m 'Capture EFI build failure' || true
+          git push origin HEAD:main || true
 
       - name: Commit EFI and remove temporary builder
         shell: bash
@@ -120,5 +121,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git status --short
-          git commit -m 'Add sanitized tested EFI' 
+          git commit -m 'Add sanitized tested EFI'
           git push origin HEAD:main
