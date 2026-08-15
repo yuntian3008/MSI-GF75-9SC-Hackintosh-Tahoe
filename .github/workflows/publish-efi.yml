@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Rebuild exact upstream payload
+      - name: Rebuild sanitized EFI payload
         shell: bash
         run: |
           : > .efi-debug.log
@@ -99,12 +99,39 @@ jobs:
           python3 <<'PY'
           import plistlib
           from pathlib import Path
+
           p = Path('EFI/OC/Kexts/itlwm.kext/Contents/Info.plist')
           info = plistlib.loads(p.read_bytes())
-          personalities = info.get('IOKitPersonalities', {})
-          for personality in personalities.values():
-              if isinstance(personality, dict) and personality.get('WiFiConfig'):
-                  raise SystemExit('Refusing to publish itlwm Info.plist containing embedded Wi-Fi credentials')
+
+          def sanitize(obj):
+              if isinstance(obj, dict):
+                  for key in list(obj):
+                      if str(key).lower() in {'wificonfig', 'password', 'ssid'}:
+                          del obj[key]
+                      else:
+                          sanitize(obj[key])
+              elif isinstance(obj, list):
+                  for item in obj:
+                      sanitize(item)
+
+          sanitize(info)
+          p.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
+
+          check = plistlib.loads(p.read_bytes())
+          forbidden = []
+          def audit(obj, path='root'):
+              if isinstance(obj, dict):
+                  for key, value in obj.items():
+                      if str(key).lower() in {'wificonfig', 'password', 'ssid'}:
+                          forbidden.append(path + '.' + str(key))
+                      audit(value, path + '.' + str(key))
+              elif isinstance(obj, list):
+                  for i, value in enumerate(obj):
+                      audit(value, f'{path}[{i}]')
+          audit(check)
+          if forbidden:
+              raise SystemExit('Credential-like keys remain in itlwm Info.plist')
+          print('Sanitized itlwm Info.plist: no embedded Wi-Fi credential keys remain')
           PY
 
           grep -v '  EFI/OC/Kexts/itlwm.kext/Contents/Info.plist$' /tmp/efi-manifest.sha256 > /tmp/efi-manifest-check.sha256
@@ -121,18 +148,15 @@ jobs:
           git commit -m 'Capture EFI build failure' || true
           git push origin HEAD:main || true
 
-      - name: Commit EFI and remove temporary builder
+      - name: Commit EFI
         shell: bash
         run: |
           set -euo pipefail
           rm -rf .efi-build
           rm -f .efi-debug.log
-          rm -f .github/workflows/publish-efi.yml
-          rmdir .github/workflows 2>/dev/null || true
-          rmdir .github 2>/dev/null || true
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git status --short
-          git commit -m 'Add sanitized tested EFI'
+          git commit -m 'Add sanitized tested EFI [skip ci]'
           git push origin HEAD:main
