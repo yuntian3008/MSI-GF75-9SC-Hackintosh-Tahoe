@@ -1,0 +1,35 @@
+name: Rebuild Tahoe screenshot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tmp-shot/**'
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild screenshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .tmp-shot/part-* > /tmp/tahoe-fastfetch.b64
+          base64 --decode /tmp/tahoe-fastfetch.b64 > assets/tahoe-fastfetch.jpg
+          echo '14917ac0ce936b4103cabbf195744008807567f8737d63b2c7865d6a15846ba9  assets/tahoe-fastfetch.jpg' | sha256sum --check --strict
+          file assets/tahoe-fastfetch.jpg | grep -q 'JPEG image data'
+          test "$(stat -c%s assets/tahoe-fastfetch.jpg)" -eq 37460
+      - name: Commit reconstructed JPEG
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/tahoe-fastfetch.jpg
+          git diff --cached --quiet && exit 0
+          git commit -m 'Use original Tahoe Fastfetch screenshot'
+          git push
